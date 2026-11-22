@@ -60,22 +60,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import grid_map                                # noqa: E402  같은 frontend 폴더의 격자 지도 HTML
 
 
-def conn():
-    """브라우저 접속(세션)마다 DB 연결을 하나씩 둔다.
-    st.cache_resource로 연결 하나를 모든 접속이 같이 쓰면, 내 PC와 다른 노트북(터널)이 동시에 조회할 때
-    한 연결에 쿼리가 겹쳐 오류가 난다 (mysql-connector 연결은 동시에 쓰면 안 됨)"""
-    c = st.session_state.get("_db_conn")
-    if c is None:
-        c = new_conn()
-        st.session_state["_db_conn"] = c
-    try:
-        c.ping(reconnect=True, attempts=2, delay=1)   # 오래 쉬어서 끊겼으면 다시 연결
-    except Exception:
-        c = new_conn()                                # 다시 연결도 안 되면 새로 만든다
-        st.session_state["_db_conn"] = c
-    return c
-
-
 def new_conn():
     """내 PC = db_common.connect (로컬 MySQL), 클라우드 = Secrets의 TiDB Cloud (TLS 필수)"""
     if CLOUD is None:
@@ -85,9 +69,25 @@ def new_conn():
         host=CLOUD["host"], port=int(CLOUD.get("port", 4000)), user=CLOUD["user"], password=CLOUD["password"],
         database=CLOUD.get("database", "ndb_project"), charset="utf8mb4",
         ssl_ca=CLOUD.get("ssl_ca", "/etc/ssl/certs/ca-certificates.crt"),   # Streamlit Cloud(리눅스)의 기본 인증서 묶음
-        ssl_verify_cert=True, ssl_verify_identity=True)
+        ssl_verify_cert=True, ssl_verify_identity=True,
+        use_pure=True,              # C 확장 대신 순수 Python 드라이버: 클라우드(Python 3.14)에서 연결이 끊길 때 앱 전체가 죽는(Segmentation fault) 것을 막음
+        connection_timeout=20)
     c.autocommit = False
     return c
+
+
+def query(fn, *args):
+    """조회 한 번마다 연결을 새로 열고 바로 닫음.
+    연결을 오래 들고 있으면 클라우드 DB가 쉬는 연결을 끊어 'Lost connection'이 나고,
+    여러 화면 갱신이 한 연결을 같이 쓰다 꼬일 수 있음. 결과는 아래 캐시에 저장되므로 같은 조회를 반복하지 않음"""
+    c = new_conn()
+    try:
+        return fn(c, *args)
+    finally:
+        try:
+            c.close()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------- 조회 결과 캐시
@@ -97,12 +97,12 @@ def new_conn():
 def run(mod, name, *args):
     """mod = '50' 또는 '51', name = 그 파일의 조회 함수 이름. 값은 그 함수 안에서 Prepared Statement로만 전달"""
     fn = getattr(q50 if mod == "50" else q51, name)
-    return fn(conn(), *args)
+    return query(fn, *args)
 
 
 @st.cache_data(show_spinner=False)
 def run_sql(sql, params):
-    return fetch(conn(), sql, params)
+    return query(fetch, sql, params)
 
 
 @st.cache_data(show_spinner=False)
@@ -507,7 +507,7 @@ summary = {1: q1, 2: q2, 3: q3, 4: q4, 5: q5}[qno](F)
 summary_box.subheader(QUESTIONS[qno]["title"])
 summary_box.markdown(f"**{summary}**")
 
-APP_VERSION = "2026-11-22 b"                    # 화면을 고칠 때마다 바꿔서, 클라우드에 새 코드가 올라갔는지 확인하는 용도
+APP_VERSION = "2026-11-22 d"                    # 화면을 고칠 때마다 바꿔서, 클라우드에 새 코드가 올라갔는지 확인하는 용도
 
 with st.sidebar.expander("DB 연결 확인"):
     st.write(f"코드 버전: {APP_VERSION}")
