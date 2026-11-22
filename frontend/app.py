@@ -496,7 +496,11 @@ def q5(f):
 
 
 # ---------------------------------------------------------------- 오른쪽 화면
-st.title("개·폐업 이력으로 본 충청권 생활시설 위험 진단 정보시스템")
+# 제목이 두 줄로 꺾이지 않게: 화면 폭에 맞춰 글자 크기를 줄이고(최소 1.2rem ~ 최대 2.25rem) 줄바꿈을 막음
+st.markdown(
+    '<h1 style="font-size:clamp(1.2rem, 2vw, 2.25rem); white-space:nowrap; margin:0 0 0.5rem 0;">'
+    '개·폐업 이력으로 본 충청권 생활시설 위험 진단 정보시스템</h1>',
+    unsafe_allow_html=True)
 summary_box = st.container()                # 요약은 질문 화면을 그린 뒤 위쪽에 채운다
 st.warning(QUESTIONS[qno]["banner"])
 summary = {1: q1, 2: q2, 3: q3, 4: q4, 5: q5}[qno](F)
