@@ -31,7 +31,7 @@ ETL = ROOT / "etl"                                  # 50·51번 조회 함수와
 FIGURES = ROOT / "figures"                          # PNG 그림을 읽는 곳
 sys.path.insert(0, str(ETL))
 
-st.set_page_config(page_title="충남·충북 생활시설 유지 위험 조기 진단", layout="wide")
+st.set_page_config(page_title="충청권 생활시설 위험 진단", layout="wide")
 
 # ---------------------------------------------------------------- 실행 전 확인
 def cloud_db():
@@ -242,13 +242,24 @@ def q1(f):
 
 def q2(f):
     """Q2 폐업 때문인가, 개업 정체 때문인가: 왼쪽 지수 단계별 개업률·폐업률(F2), 오른쪽 위험 구간 그림(fig3) + 시군 위치(F4)"""
-    r = run("50", "f2_index_class", f["type_name"], "all").copy()          # 26곳, 2012~2025년, 작년 영업 수 5곳 이상
+    # 7개 업종을 한 번에 조회한 뒤 화면에서 업종을 고름 (업종별로 따로 조회하지 않아 캐시 1개로 끝남)
+    r = run("50", "f2_index_class", "", "all").copy()          # 26곳, 2012~2025년, 작년 영업 수 5곳 이상
+    if f["type_name"]:
+        r = r[r["업종"] == f["type_name"]]
+    if r.empty:
+        st.warning(f"조회 결과가 없습니다 (업종: {f['type_name'] or '전체'}). 사이드바 맨 아래 'DB 연결 확인'을 펼쳐 캡처해 주세요.")
+        return "조회 결과 없음"
+    r = r.copy()
     for k in ("개업률", "폐업률", "순증감률"):
         r[k] = r[k] * 100                                     # 화면은 % 단위
 
     left, right = st.columns(2)
     with left:
-        if f["type_name"]:
+        if f["type_name"] and r.empty:
+            # 업종을 골랐는데 0행이면 조회 조건(업종 이름 비교)이 DB에서 맞지 않은 것 → 원인 확인용 안내
+            st.warning(f"'{f['type_name']}' 조회 결과가 0행입니다. DB 연결·업종 이름 비교를 확인해야 합니다. "
+                       f"(접속 DB: {'클라우드 TiDB' if CLOUD else '내 PC MySQL'})")
+        elif f["type_name"]:
             st.markdown(f"**{f['type_name']}: 소멸위험지수 단계별 개업률 vs 폐업률** (충청 26곳, 2012–2025년)")
             bars = r.set_index("지수단계")[["개업률", "폐업률"]]
             st.bar_chart(bars, stack=False, y_label="연평균 비율 (%)", x_label="소멸위험지수 단계 (1 = 소멸고위험)")
@@ -257,7 +268,7 @@ def q2(f):
                          column_config={k: st.column_config.NumberColumn(format="%.2f%%")
                                         for k in ("개업률", "폐업률", "순증감률")})
         else:
-            st.markdown("**업종별·단계별 순증감률 (%)** — 업종을 고르면 개업률·폐업률 막대가 나옵니다")
+            st.markdown("**업종별·단계별 순증감률 (%)** — 왼쪽 사이드바의 '업종'에서 고르면 개업률·폐업률 막대가 나옵니다")
             wide = r.pivot_table(index="업종", columns="지수단계", values="순증감률", aggfunc="first")
             st.dataframe(wide, width="stretch",
                          column_config={k: st.column_config.NumberColumn(format="%+.2f") for k in wide.columns})
@@ -293,7 +304,7 @@ def q2(f):
                        "경계가 자료 범위 밖. 최종 등급은 두 지표를 함께 넣은 예측으로 정하므로 1번 질문의 등급과 다를 수 있습니다.")
 
     if not f["type_name"]:
-        return "업종을 하나 고르면 단계별 개업률과 폐업률을 비교한 요약이 나옵니다."
+        return "왼쪽 사이드바의 '업종'에서 하나 고르면 단계별 개업률과 폐업률을 비교한 요약이 나옵니다."
     lo = r[r["지수단계"].str.startswith("1")]
     hi = r[r["지수단계"].str.startswith("5")]
     if lo.empty or hi.empty:
@@ -485,13 +496,17 @@ def q5(f):
 
 
 # ---------------------------------------------------------------- 오른쪽 화면
-st.title("충남·충북 생활시설 유지 위험 조기 진단 정보시스템")
+st.title("개·폐업 이력으로 본 충청권 생활시설 위험 진단 정보시스템")
 summary_box = st.container()                # 요약은 질문 화면을 그린 뒤 위쪽에 채운다
 st.warning(QUESTIONS[qno]["banner"])
 summary = {1: q1, 2: q2, 3: q3, 4: q4, 5: q5}[qno](F)
 summary_box.subheader(QUESTIONS[qno]["title"])
 summary_box.markdown(f"**{summary}**")
 
-with st.sidebar.expander("DB 연결 확인 (1단계)"):
+APP_VERSION = "2026-11-22 b"                    # 화면을 고칠 때마다 바꿔서, 클라우드에 새 코드가 올라갔는지 확인하는 용도
+
+with st.sidebar.expander("DB 연결 확인"):
+    st.write(f"코드 버전: {APP_VERSION}")
+    st.write(f"접속 DB: {'클라우드 TiDB' if CLOUD else '내 PC MySQL'}")
     st.write(f"시군 {len(regions)}곳, 업종 {len(q50.MODEL_TYPES)}개")
     st.write(f"선택: {F}")
